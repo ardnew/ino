@@ -15,7 +15,7 @@ summary="${self} version ${version} (${pkgdate})"
 
 flags="
   -b FQBN           Use FQBN specified at command-line
-  -B [FILTER]       List all known FQBNs matching FILTER
+  -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
   -e PATH           Source env file at PATH
   -g                Optimize for debugging
@@ -50,6 +50,9 @@ ${summary}
 
   Flash a sketch:
     ${self} -p /target/device [flags] [sketch]
+
+  List/find an FQBN:
+    ino -B [pattern]
 
   Call arduino-cli:
     ${self} cli [...]
