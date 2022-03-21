@@ -31,9 +31,9 @@ brief() {
 ${summary}
 
 USAGE:
-	${self} [flags] [sketch]         # build/flash a sketch
+  ${self} [flags] [sketch]         # build/flash a sketch
   ${self} -B [pattern]             # list/search for FQBN
-	${self} cli [...]                # alias for arduino-cli
+  ${self} cli [...]                # alias for arduino-cli
 
 FLAGS:
 ${flags}
