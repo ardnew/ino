@@ -13,6 +13,9 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
   Flash a sketch:
     ino -p /target/device [flags] [sketch]
 
+  List/find an FQBN:
+    ino -B [pattern]
+
   Call arduino-cli:
     ino cli [...]
 
@@ -59,7 +62,7 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
 ╞══╡ FLAGS ╞═══════════════════════════════════════════════════════════════════╡
 
   -b FQBN           Use FQBN specified at command-line
-  -B [FILTER]       List all known FQBNs matching FILTER
+  -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
   -e PATH           Source env file at PATH
   -g                Optimize for debugging
