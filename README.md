@@ -1,6 +1,31 @@
 # ino
 #### Wrapper script for building with `arduino-cli`
 
+## Brief
+```
+% ino -h
+ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
+
+USAGE:
+  ino [flags] [sketch]         # build/flash a sketch
+  ino -B [pattern]             # list/search for FQBN
+  ino cli [...]                # alias for arduino-cli
+
+FLAGS:
+
+  -b FQBN           Use FQBN specified at command-line
+  -B [PATTERN]      List all FQBNs matching PATTERN
+  -c                Clean build directory
+  -e PATH           Source env file at PATH
+  -g                Optimize for debugging
+  -h                Brief help summary
+  -H                Detailed usage and examples
+  -l LEVEL          Set log verbosity to LEVEL (see ino cli --help)
+  -p PORT           Upload to device at path PORT
+  -*                Append arbitrary flag
+```
+
+## Usage
 ```
 % ino -H
 ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
