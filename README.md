@@ -13,7 +13,7 @@ USAGE:
 
 FLAGS:
 
-  -A [PATTERN]      Add all FQBNs matching PATTERN to project
+  -A PATTERN        Add all FQBNs matching PATTERN to project
   -b FQBN           Use FQBN specified at command-line
   -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
@@ -23,7 +23,7 @@ FLAGS:
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ino cli --help)
   -p PORT           Upload to device at path PORT
-  -R [PATTERN]      Remove all FQBNs matching PATTERN from project
+  -R PATTERN        Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
 ```
 

@@ -14,7 +14,7 @@ pkgdate="28 Mar 2022 10:20:04 CDT"
 summary="${self} version ${version} (${pkgdate})"
 
 flags="
-  -A [PATTERN]      Add all FQBNs matching PATTERN to project
+  -A PATTERN        Add all FQBNs matching PATTERN to project
   -b FQBN           Use FQBN specified at command-line
   -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
@@ -24,7 +24,7 @@ flags="
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ${self} cli --help)
   -p PORT           Upload to device at path PORT
-  -R [PATTERN]      Remove all FQBNs matching PATTERN from project
+  -R PATTERN        Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
 "
 
