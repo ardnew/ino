@@ -24,6 +24,7 @@ flags="
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ${self} cli --help)
   -p PORT           Upload to device at path PORT
+  -R [PATTERN]      Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
 "
 
