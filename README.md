@@ -4,7 +4,7 @@
 ## Brief
 ```
 % ino -h
-ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
+ino version 0.3.0 (28 Mar 2022 10:20:04 CDT)
 
 USAGE:
   ino [flags] [sketch]         # build/flash a sketch
