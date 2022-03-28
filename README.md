@@ -13,6 +13,7 @@ USAGE:
 
 FLAGS:
 
+  -A [PATTERN]      Add all FQBNs matching PATTERN to project
   -b FQBN           Use FQBN specified at command-line
   -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
@@ -22,13 +23,14 @@ FLAGS:
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ino cli --help)
   -p PORT           Upload to device at path PORT
+  -R [PATTERN]      Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
 ```
 
 ## Usage
 ```
 % ino -H
-ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
+ino version 0.3.0 (28 Mar 2022 10:20:04 CDT)
 
 ╒══╡ USAGE ╞═══════════════════════════════════════════════════════════════════╕
 
@@ -66,7 +68,7 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
   The ".fqbn" directory must be in the root of the resolved sketch directory if
   FQBN is not specified with any of the following methods:
 
-    - Specified directly with flag -b
+    - Specified directly with flag -b 
     - Defined in a shell environment script specified with flag -e
 
   Both of these will override any FQBNs discovered in the ".fqbn" subdirectory.
@@ -74,7 +76,18 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
              ──────── ARGUMENTS FORWARDED TO ARDUINO-CLI ─────────
 
   Any unrecognized flags (arguments with leading "-"), along with any remaining
-  non-sketch-path arguments, are passed to arduino-cli verbatim.
+  non-sketch-path arguments, are passed to arduino-cli verbatim. All flags given
+  after the end-of-arguments delimiter "--" are also passed to arduino-cli.
+  
+    - Note that any arduino-cli flag intermixed (i.e., preceeding "--") which 
+      requires an argument must be specified using its long form syntax 
+      (i.e., "--flag=VALUE"). For example: 
+
+        ino upload -i INPUT-FILE               # WRONG
+        ino upload --input-file INPUT-FILE     # WRONG
+        ino upload --input-file=INPUT-FILE     # OK!
+        ino upload -- -i INPUT-FILE            # OK!
+        ino cli upload -i INPUT-FILE           # OK!
 
   For configuration variables, see:
     https://arduino.github.io/arduino-cli/latest/configuration/
@@ -84,8 +97,37 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
   sketch path), all flags and trailing arguments are passed to arduino-cli
   verbatim. In other words, "ino cli" is an alias for "arduino-cli".
 
+         ──────── TARGET-SPECIFIC FLAGS PASSED TO ARDUINO-CLI ─────────         
+	
+  The FQBN files described above under "FULLY-QUALIFIED BOARD NAME (FQBN)" also
+  allow you to store target-specific settings that are used automatically when
+  calling arduino-cli for that FQBN. The files are JSON-formatted with a single
+  dictionary keyed by arduino-cli commands. The value for each of these keys is
+  a list of command-line flags and arguments to append when calling that command
+  for that FQBN. An additional "global" key is supported whose list of flags and
+  arguments are appended for all arduin-cli commands.
+
+  If the FQBN file is empty, no target-specific flags or arguments are 
+  automatically added for any arduino-cli command.
+
+  An example FQBN file may look like the following:
+
+    % cat .fqbn/adafruit\:avr\:metro
+    {
+        "global": [ "--format text", "--log-format json" ],
+        "compile": [ "--build-property 'build.extra_flags=-DFOO'" ]
+    }
+
+  In this case, the flags "--format text" and "--log-format json" will be added
+  to all invocation of arduino-cli for the target FQBN "adafruit:avr:metro".
+
+  If the arduino-cli "compile" command is called (the default command), then the
+  flag "--build-property 'build.extra_flags=-DFOO'" will always be added (in 
+  addition to the global flags above) for the target FQBN "adafruit:avr:metro".
+
 ╞══╡ FLAGS ╞═══════════════════════════════════════════════════════════════════╡
 
+  -A [PATTERN]      Add all FQBNs matching PATTERN to project
   -b FQBN           Use FQBN specified at command-line
   -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
@@ -95,16 +137,17 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ino cli --help)
   -p PORT           Upload to device at path PORT
+  -R [PATTERN]      Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
 
 ╞══╡ EXAMPLES ╞════════════════════════════════════════════════════════════════╡
 
   A simple "blinky" Arduino project structure might look like the following,
-  where you have a sketch source file "blinky.ino" whose basename "blinky" is
+  where you have a sketch source file "blinky.ino" whose basename "blinky" is 
   identical to the name of its parent directory:
 
     blinky/
-    └── blinky.ino
+    └── blinky.ino 
 
   The aim of this script is to reduce the overall typing and complexity of the
   arduino-cli command-line options. Part of the issue is the esoteric and
@@ -129,18 +172,34 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
     │   ├── adafruit:nrf52:cluenrf52840
     │   ├── adafruit:samd:adafruit_grandcentral_m4
     │   └── teensy:avr:teensy40
-    └── blinky.ino
+    └── blinky.ino 
+
+    ╭─────────────────────────────────────────────────────────────────────╮
+    │ [NOTE] Alternatively, you can use the add flag (-A pattern) to      │
+    │        create the ".fqbn" directory in the project, initialized     │
+    │        with all matching FQBNs. Run from the project root:          │
+    │                                                                     │
+    │          % ino -A cluenrf52 grandcentral teensy40                   │
+    │                                                                     │
+    │        This creates the same directory tree as listed above.        │
+    │                                                                     │
+    │        Using the corresponding remove flag (-R pattern) will remove │
+    │        all matching FQBNs from the project:                         │
+    │                                                                     │
+    │          % ino -R cluenrf52 grandcentral teensy40                   │
+    │                                                                     │
+    ╰─────────────────────────────────────────────────────────────────────╯
 
   Next we can build and export the executables to the "build" subdirectory of
   our sketch. We will add the clean flag (-c) to ensure the Arduino core is
   rebuilt each time, debug flag (-g) so that we can do source-level debugging
-  with a hardware debug probe, and extremely verbose logging (-l debug) to see
+  with a hardware debug probe, and extremely verbose logging (-l debug) to see 
   what errors were printed if compilation fails:
 
 	  % ino -c -g -l debug
 
-  Since all three targets build without error, I now have the following files
-  and directory structure in my sketch project:
+  Since all three targets build without error, we now have the following files
+  and directory structure in our sketch directory:
 
     blinky/
     ├── build/
@@ -173,14 +232,20 @@ ino version 0.2.0 (20 Mar 2022 15:42:04 CDT)
     % ino -b $( ino -B grandcentral ) -p /dev/ttyACM2
 
   Along with the mentioned flags, arduino-cli can also read configuration data
-  from environment variables as well as its own command-line flags.
+  from environment variables as well as its own command-line flags. 
 
   The following example demonstrates an elaborate method to exercise each of
-  these capabilities. The calling environment is modified, an environment file
-  is given as argument (using process substitution, but you could of course use
-  a regular file path), and unrecognized flags are passed on to arduino-cli:
+  these capabilities: 
 
     % ARDUINO_LOGGING_FILE=build.log \
-          ino -e <( env -i FQBN=$( ino -B grandcentral ) ) \
-              --build-property "build.extra_flags=\"-DFOO=\"BAR\"\""
+        ino -e <( env -i FQBN=$( ino -B grandcentral ) ) \
+          --build-property "build.extra_flags=\"-DFOO=\"BAR\"\""
+
+  Specifically, the following behaviors are demonstrated:
+
+    a. Modify ARDUINO_LOGGING_FILE in caller environment
+    b. Source environment "file", provided as flag -e argument
+      i. Bash's process substitution "<( cmd )" is used to create a
+         virtual file, but you could of course use a regular file path
+    c. Unrecognized flags are passed on to arduino-cli verbatim
 ```
