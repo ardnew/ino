@@ -493,10 +493,10 @@ for fqbn in "${target[@]}"; do
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
 	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -a glo sel
+	declare -a global selcmd
 	# Use only the global flags and those defined for our selected command
-	fqbn-flags glo sel "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
-	cmd+=( "${glo[@]}" "${sel[@]}" )
+	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
+	cmd+=( "${global[@]}" "${selcmd[@]}" )
 	cmd+=( "${path%/*}" )
 	# run command
 	set -o xtrace
