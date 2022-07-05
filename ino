@@ -411,14 +411,18 @@ if [[ ${#opt_R[@]} -gt 0 ]]; then
 fi
 
 fqbn-flags() {
-	[[ ${#} -gt 1 && -r "${2}" ]] || return
-	local -n cmd=${1}
-	local -a key=( $( command jq -r 'keys[]' "${2}" ) ) 
+	[[ ${#} -gt 3 && -r "${4}" ]] || return
+	local -n glo=${1}
+	local -n sel=${2}
+	local -a key=( $( command jq -r 'keys[]' "${4}" ) ) 
 	for k in "${key[@]}"; do
 		while read -re arg; do
-			[[ -n ${arg} && ${arg} != null ]] &&
-				cmd[${k}]+="${arg} "
-		done < <( command jq -r ".${k}[]" "${2}" )
+			[[ -n ${arg} && ${arg} != null ]] || continue
+			case "$k" in
+				global) glo+=( "${arg}" ) ;;
+				$3)     sel+=( "${arg}" ) ;;
+			esac
+		done < <( command jq -r ".${k}[]" "${4}" )
 	done
 }
 
@@ -489,10 +493,10 @@ for fqbn in "${target[@]}"; do
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
 	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -A extra
-	fqbn-flags extra "${path%/*}/.fqbn/${fqbn}"
+	declare -a glo sel
 	# Use only the global flags and those defined for our selected command
-	cmd+=( ${extra['global']} ${extra[${cmd[1]}]} )
+	fqbn-flags glo sel "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
+	cmd+=( "${glo[@]}" "${sel[@]}" )
 	cmd+=( "${path%/*}" )
 	# run command
 	set -o xtrace
