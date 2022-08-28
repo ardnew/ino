@@ -410,7 +410,7 @@ touch-fqbn() {
     ],
     "compile": [
         "--warnings all",
-        "--build-property 'build.extra_flags=-DFQBN=${1##*/}'"
+        "--build-property \"build.extra_flags=-DFQBN=${1##*/}\""
     ]
 }
 __json__
@@ -496,10 +496,10 @@ fqbn-flags() {
 	local -a key=( $( command jq -r 'keys[]' "${4}" ) )
 	for k in "${key[@]}"; do
 		while read -re arg; do
-			[[ -n ${arg} && ${arg} != 'null' ]] || continue
+			[[ -n ${arg} && ${arg} != null ]] || continue
 			case "${k}" in
-				global) glo+=( "${arg}" ) ;;
-				${3})   sel+=( "${arg}" ) ;;
+				global) glo+=( ${arg} ) ;;
+				${3})   sel+=( ${arg} ) ;;
 			esac
 		done < <( command jq -r ".${k}[]" "${4}" )
 	done
@@ -650,7 +650,7 @@ for fqbn in "${target[@]}"; do
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
 	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -A global selcmd
+	declare -a global selcmd
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
 	cmd+=( "${global[@]}" "${selcmd[@]}" )
