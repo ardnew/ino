@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 
-# ------------------------------------------------------------------------------
-#
-#
-# ------------------------------------------------------------------------------
+# Verify bash is new enough to support all script features.
+if [[ -z $BASH_VERSINFO || ${BASH_VERSINFO[0]} -lt 5 ]]; then
+	printf -- "error: bash version 5.0 or newer required (found: %s)\n" \
+		"${BASH_VERSION:-<undefined>}"
+	exit 127
+fi
 
 # Bail on error.
 set -oo errexit pipefail
 
 self=${0##*/}
-version="0.3.0"
-pkgdate="28 Mar 2022 10:20:04 CDT"
+version="0.3.1"
+pkgdate="2022-08-28 14:33:51 CDT"
 summary="${self} version ${version} (${pkgdate})"
+nowdate=$( date +'%F %T %Z' )
 
 flags="
   -A PATTERN        Add all FQBNs matching PATTERN to project
@@ -23,6 +26,7 @@ flags="
   -h                Brief help summary
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ${self} cli --help)
+  -n TEMPLATE       Create a sketch .ino (\"empty\", \"blinky\", or file path)
   -p PORT           Upload to device at path PORT
   -R PATTERN        Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
@@ -255,33 +259,174 @@ _usage_
 # Bail on demand.
 halt() { printf -- 'error: %s\n' "${@}" >&2; exit 1; }
 
-declare -x bin
-if bin=$( type -P arduino-cli ); then
-	bin=$( realpath -qe "${bin}" )
-else
-	halt "command not found: arduino-cli"
-fi
+# Initialize and return the full path to a temporary file containing the sketch
+# file's (.ino) main source. The contents are generated based on the TEMPLATE
+# argument given with command-line flag -n, which may be:
+#   a.) A filepath that refers to an existing file (regular file or symlink)
+#   b.) The name of a predefined template embedded in this script
+sketch-template() {
+	local name=${1}
+	local tmpl=${2}
+	if temp=$( mktemp --tmpdir --quiet "${self}.XXXXXX" ); then
+		# If given template (via command-line flag -n) is a file path, use it to
+		# initialize our sketch.
+		if [[ -f "${tmpl}" || -L "${tmpl}" ]] && [[ -r "${tmpl}" ]]; then
+			# Copy the given file to a temporary location so that the caller doesn't
+			# have to care about where the template comes from.
+			cp "${tmpl}" "${temp}" || return 1
+		else
+			# Otherwise, the given template must be one of the named templates
+			# predefined in this script:
+			unset -v src
+			head="// ${name}.ino (automatically generated ${nowdate})"
+			case "${tmpl,,}" in
+				empty)
+					src="
+void setup() {
+}
+
+void loop() {
+}
+"
+					;;
+				blinky)
+					src="
+// Return type of Arduino core function millis()
+typedef unsigned long duration_t;
+
+// Turn LED on for ONDUTY ms every PERIOD ms
+static duration_t const PERIOD = 1000UL; // 1.0 s
+static duration_t const ONDUTY =  100UL; // 0.1 s
+
+// Target device wiring configuration
+#define PIN_LED LED_BUILTIN
+#define LED_ON  HIGH
+#define LED_OFF LOW
+
+void setup() {
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LED_OFF);
+}
+
+void loop() {
+  // Static data retained across function calls
+  static duration_t sync = 0UL;
+  static bool       isOn = false;
+  // Data that is computed every function call
+  duration_t now = millis();
+  duration_t ela = now - sync;
+  if (isOn) {
+    if (ela >= ONDUTY) {
+      digitalWrite(PIN_LED, LED_OFF);
+      isOn = false;
+    }
+  } else {
+    if (ela >= PERIOD) {
+      digitalWrite(PIN_LED, LED_ON);
+      isOn = true;
+      sync = now;
+    }
+  }
+}
+"
+			esac
+			# Verify we recognized the given template identifier.
+			[[ -n ${src} ]] || return 1
+			# Write sketch source and return the full path to the temp file if 
+			# successful. The caller is responsible for cleaning up the temp file.
+			if printf '%s\n%s' "${head}" "${src}" > "${temp}"; then
+				echo "${temp}"
+				return 0
+			fi
+		fi
+	fi
+	# Failed to create temporary file
+	return 1
+}
+
+sketch-init() {
+	local inotmpl=${1}
+	local -n outp=${2}
+	local -n argv=${3}
+	for i in "${!argv[@]}"; do
+		# Verify given arg contains only valid path chars
+		a=$( realpath -qsm "${argv[${i}]}" ) || continue
+		# Discard filename if given sketch path is not a directory
+		[[ -d "${a}" ]] || a=${a%/*}
+		# Ensure sketch directory path exists
+		mkdir -p "${a}" || return 1
+		# Use a file named "<foo>/<foo>.ino"
+		if p=$( realpath -qsm "${a}/${a##*/}.ino" ); then
+			if [[ -f "${p}" ]]; then
+				err="file exists"
+			else
+				mv "$( sketch-template "${a##*/}" "${inotmpl}" )" "${p}" ||
+					err="invalid template"
+			fi
+			echo "++ ${a}/${a##*/}.ino${err:+" (failed: ${err})"}"
+			if [[ -z ${err} ]]; then
+				# Remove this element from the arg array and set sketch path
+				unset -v argv[${i}]
+				outp=${p}
+				return 0
+			fi
+		fi
+	done
+	return 1
+}
 
 # Normalize the sketch path as the absolute path to the .ino sketch file.
 # Can be deduced given either a directory or file path. 
 # Sketches named <foo>.ino must be inside of a directory named <foo>.
 sketch-path() {
-	local -n _path=${1}
-	local -n _arg=${2}
-	for i in "${!_arg[@]}"; do
+	local -n outp=${1}
+	local -n argv=${2}
+	for i in "${!argv[@]}"; do
 		# Verify given path exists
-		a=$( realpath -qse "${_arg[${i}]}" ) || continue
+		a=$( realpath -qse "${argv[${i}]}" ) || continue
 		# Discard filename if given sketch path is not a directory
 		[[ -d "${a}" ]] || a=${a%/*}
 		# Verify we have a file named "<foo>/<foo>.ino"
 		if p=$( realpath -qse "${a}/${a##*/}.ino" ); then
 			# Remove this element from the arg array and set sketch path
-			unset -v _arg[${i}]
-			_path=${p}
+			unset -v argv[${i}]
+			outp=${p}
 			return 0
 		fi
 	done
 	return 1
+}
+
+touch-fqbn() {
+	unset -v err
+	if [[ -f "${1}" && -r "${1}" ]]; then
+		echo " ~ ${1##*/}"
+	else
+		err=$( cat <<__json__ 2>&1 >"${1}"
+{
+    "global": [
+        "--format text",
+        "--log-format json"
+    ],
+    "compile": [
+        "--warnings all",
+        "--build-property 'build.extra_flags=-DFQBN=${1##*/}'"
+    ]
+}
+__json__
+		)
+		echo "++ ${1##*/}${err:+" (failed: ${err})"}"
+	fi
+	[[ -z ${err} ]]
+}
+
+rm-fqbn() {
+	unset -v err
+	if [[ -f "${1}" && -r "${1}" ]]; then
+		err=$( rm "${1}" 2>&1 )
+		echo "-- ${1##*/}${err:+" (failed: ${err})"}"
+	fi
+	[[ -z ${err} ]]
 }
 
 valid-fqbn() {
@@ -319,113 +464,6 @@ list-all() {
 	exit
 }
 
-# Before we process the command-line, check if everything should instead be
-# forwarded to arduino-cli.
-if [[ ${#} -gt 0 && ${1} == "cli" ]]; then
-	# Replace this process ewith a call to arduino-cli.
-	exec "${bin}" "${@:2}"
-fi
-
-# Storage for our command line arguments and optional flags
-declare -a arg flag
-declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_p
-declare -ax opt_A opt_R
-
-# Assign $2 to the variable named $1 (or die).
-optstr() {
-	[[ ${#} -gt 1 ]] || 
-		halt "flag requires argument (-${1#opt_})"
-	local -n v=${1}
-	v=${2}
-}
-
-# Append $@ to the array variable named $1 (or die).
-optarr() {
-	[[ ${#} -gt 1 ]] ||
-		halt "flag requires argument (-${1#opt_})"
-	local -n v=${1}
-	v+=( "${@:2}" )
-}
-
-# Poor-man's command-line option parsing
-while [[ ${#} -gt 0 ]]; do
-	case "${1}" in
-		-A) shift; optarr opt_A "${@}" ;;   # add all matching FQBNs
-		-b) shift; optstr opt_b "${@}" ;;   # use FQBN specified at command-line
-		-B) shift; list-all "${@}" ;;       # list all matching FQBNs
-		-c) opt_c=1 ;;                      # clean build directory
-		-e) shift; optstr opt_e "${@}" ;;   # source given env
-		-g) opt_g=1 ;;                      # keep debug symbols
-		-h) brief; exit 0 ;;                # print brief help and exit
-		-H) usage; exit 0 ;;                # print detailed usage and exit
-		-l) shift; optstr opt_l "${@}" ;;   # set log level
-		-p) shift; optstr opt_p "${@}" ;;   # upload to port
-		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
-		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
-		--) flag+=( "${@}" ); break ;;      # append all remaining flags/arguments
-		*)  arg+=( "${1}" ) ;;              # append arbitrary argument
-	esac
-	shift
-done
-
-# Determine path to our sketch file.
-if ! sketch-path path arg; then
-	cwd=( "${PWD}" )
-	sketch-path path cwd || [[ ${#arg[@]} -gt 0 ]] ||  halt 'sketch not found'
-fi
-
-# Keep a flag indicating if we have processed .fqbn content
-unset -v fqbnmod
-# Add all matching FQBNs to project
-if [[ ${#opt_A[@]} -gt 0 ]]; then
-	fqbndir="${path%/*}/.fqbn"
-	mkdir -p "${fqbndir}"
-	while read -re fqbn; do
-		if [[ -r "${fqbndir}/${fqbn}" ]]; then
-			echo " ~ ${fqbn}"
-		else
-			err=$( touch "${fqbndir}/${fqbn}" 2>&1 )
-			echo "++ ${fqbn}${err:+" (failed: ${err})"}"
-		fi
-	done < <( match-fqbn "${opt_A[@]}" )
-	fqbnmod=1
-fi
-
-# Remove all matching FQBNs from project
-if [[ ${#opt_R[@]} -gt 0 ]]; then
-	fqbndir="${path%/*}/.fqbn"
-	if [[ -d "${fqbndir}" ]]; then
-		while read -re fqbn; do
-			if [[ -r "${fqbndir}/${fqbn}" ]]; then
-				err=$( rm "${fqbndir}/${fqbn}" 2>&1 )
-				echo "-- ${fqbn}${err:+" (failed: ${err})"}"
-			else
-				echo " ~ ${fqbn}"
-				touch "${fqbndir}/${fqbn}"
-			fi
-		done < <( match-fqbn "${opt_A[@]}" )
-		# Remove the .fqbn directory if and only if it is empty.
-		rmdir "${fqbndir}" &>/dev/null
-	fi
-	fqbnmod=1
-fi
-
-fqbn-flags() {
-	[[ ${#} -gt 3 && -r "${4}" ]] || return
-	local -n glo=${1}
-	local -n sel=${2}
-	local -a key=( $( command jq -r 'keys[]' "${4}" ) ) 
-	for k in "${key[@]}"; do
-		while read -re arg; do
-			[[ -n ${arg} && ${arg} != null ]] || continue
-			case "$k" in
-				global) glo+=( "${arg}" ) ;;
-				$3)     sel+=( "${arg}" ) ;;
-			esac
-		done < <( command jq -r ".${k}[]" "${4}" )
-	done
-}
-
 # Source the given file containing environment definitions.
 source-env() {
 	# temporarily set the allexport option if the user does not have it enabled.
@@ -450,6 +488,125 @@ source-env() {
 	# their environment unintentionally.
 	[[ -n ${set_a+?} ]] && set +o allexport
 }
+
+fqbn-flags() {
+	[[ ${#} -gt 3 && -r "${4}" ]] || return
+	local -n glo=${1}
+	local -n sel=${2}
+	local -a key=( $( command jq -r 'keys[]' "${4}" ) )
+	for k in "${key[@]}"; do
+		while read -re arg; do
+			[[ -n ${arg} && ${arg} != 'null' ]] || continue
+			case "${k}" in
+				global) glo+=( "${arg}" ) ;;
+				${3})   sel+=( "${arg}" ) ;;
+			esac
+		done < <( command jq -r ".${k}[]" "${4}" )
+	done
+}
+
+# Assign $2 to the variable named $1 (or die).
+optstr() {
+	[[ ${#} -gt 1 ]] || 
+		halt "flag requires argument (-${1#opt_})"
+	local -n v=${1}
+	v=${2}
+}
+
+# Append $@ to the array variable named $1 (or die).
+optarr() {
+	[[ ${#} -gt 1 ]] ||
+		halt "flag requires argument (-${1#opt_})"
+	local -n v=${1}
+	v+=( "${@:2}" )
+}
+
+# Verify we have an arduino-cli executable in $PATH.
+declare -x bin
+if bin=$( type -P arduino-cli ); then
+	bin=$( realpath -qe "${bin}" )
+else
+	halt "command not found: arduino-cli"
+fi
+
+# Before we process the command-line, check if everything should instead be
+# forwarded to arduino-cli.
+if [[ ${#} -gt 0 && ${1} == "cli" ]]; then
+	# Replace this process with a call to arduino-cli.
+	exec "${bin}" "${@:2}"
+fi
+
+# Storage for our command line arguments and optional flags
+declare -a arg flag
+declare -x path
+declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_p
+declare -ax opt_A opt_R
+
+# Poor-man's command-line option parsing
+while [[ ${#} -gt 0 ]]; do
+	case "${1}" in
+		-A) shift; optarr opt_A "${@}" ;;   # add all matching FQBNs
+		-b) shift; optstr opt_b "${@}" ;;   # use FQBN specified at command-line
+		-B) shift; list-all "${@}" ;;       # list all matching FQBNs
+		-c) opt_c=1 ;;                      # clean build directory
+		-e) shift; optstr opt_e "${@}" ;;   # source given env
+		-g) opt_g=1 ;;                      # keep debug symbols
+		-h) brief; exit 0 ;;                # print brief help and exit
+		-H) usage; exit 0 ;;                # print detailed usage and exit
+		-l) shift; optstr opt_l "${@}" ;;   # set log level
+		-n) shift; optstr opt_n "${@}" ;;   # create sketch file (.ino)
+		-p) shift; optstr opt_p "${@}" ;;   # upload to port
+		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
+		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
+		--) flag+=( "${@}" ); break ;;      # append all remaining flags/arguments
+		*)  arg+=( "${1}" ) ;;              # append arbitrary argument
+	esac
+	shift
+done
+
+# Determine path to our sketch file.
+unset -v created
+if [[ -n ${opt_n} ]]; then
+	# Use PWD if no args given
+	[[ ${#arg[@]} -gt 0 ]] || arg+=( "${PWD}" )
+	sketch-init "${opt_n}" path arg ||
+		halt 'failed to create sketch'
+	# When creating a sketch, just like adding/removing FQBNs, we exit early
+	# before building so the user can review what occurred.
+	# - We don't want to exit immediately though, wait until we have processed
+	#   each of these operations requested via command-line flags.
+	created=1
+elif ! sketch-path path arg; then
+	cwd=( "${PWD}" )
+	sketch-path path cwd || [[ ${#arg[@]} -gt 0 ]] || 
+		halt 'sketch not found'
+fi
+
+# Add all matching FQBNs to project
+if [[ ${#opt_A[@]} -gt 0 ]]; then
+	fqbndir="${path%/*}/.fqbn"
+	mkdir -p "${fqbndir}"
+	while read -re fqbn; do
+		touch-fqbn "${fqbndir}/${fqbn}"
+	done < <( match-fqbn "${opt_A[@]}" )
+	exit
+fi
+
+# Remove all matching FQBNs from project
+if [[ ${#opt_R[@]} -gt 0 ]]; then
+	fqbndir="${path%/*}/.fqbn"
+	if [[ -d "${fqbndir}" ]]; then
+		while read -re fqbn; do
+			rm-fqbn "${fqbndir}/${fqbn}"
+		done < <( match-fqbn "${opt_R[@]}" )
+		# Remove the .fqbn directory if and only if it is empty.
+		rmdir "${fqbndir}" &>/dev/null
+	fi
+	exit
+fi
+
+# Don't build the sketch if we just now created it.
+[[ -z ${created} ]] || exit
 
 # If given, source the environment file specified with -e <path>.
 [[ -n ${opt_e} ]] && source-env "${opt_e}"
@@ -493,9 +650,9 @@ for fqbn in "${target[@]}"; do
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
 	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -a global selcmd
-	# Use only the global flags and those defined for our selected command
+	declare -A global selcmd
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
+	# Use only the global flags and those defined for our selected command
 	cmd+=( "${global[@]}" "${selcmd[@]}" )
 	cmd+=( "${path%/*}" )
 	# run command
