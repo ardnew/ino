@@ -12,7 +12,7 @@ set -oo errexit pipefail
 
 self=${0##*/}
 version="0.3.1"
-pkgdate="Sat Aug 27 04:15:51 PM CDT 2022"
+pkgdate="2022-08-28 14:33:51 CDT"
 summary="${self} version ${version} (${pkgdate})"
 nowdate=$( date +'%F %T %Z' )
 
@@ -490,14 +490,18 @@ source-env() {
 }
 
 fqbn-flags() {
-	[[ ${#} -gt 1 && -r "${2}" ]] || return
-	local -n cmd=${1}
-	local -a key=( $( command jq -r 'keys[]' "${2}" ) ) 
+	[[ ${#} -gt 3 && -r "${4}" ]] || return
+	local -n glo=${1}
+	local -n sel=${2}
+	local -a key=( $( command jq -r 'keys[]' "${4}" ) )
 	for k in "${key[@]}"; do
 		while read -re arg; do
-			[[ -n ${arg} && ${arg} != null ]] &&
-				cmd[${k}]+="${arg} "
-		done < <( command jq -r ".${k}[]" "${2}" )
+			[[ -n ${arg} && ${arg} != 'null' ]] || continue
+			case "${k}" in
+				global) glo+=( "${arg}" ) ;;
+				${3})   sel+=( "${arg}" ) ;;
+			esac
+		done < <( command jq -r ".${k}[]" "${4}" )
 	done
 }
 
@@ -646,10 +650,10 @@ for fqbn in "${target[@]}"; do
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
 	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -A extra
-	fqbn-flags extra "${path%/*}/.fqbn/${fqbn}"
+	declare -A global selcmd
+	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
-	cmd+=( ${extra['global']} ${extra[${cmd[1]}]} )
+	cmd+=( "${global[@]}" "${selcmd[@]}" )
 	cmd+=( "${path%/*}" )
 	# run command
 	set -o xtrace
