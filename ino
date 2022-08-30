@@ -14,7 +14,35 @@ self=${0##*/}
 version="0.3.1"
 pkgdate="2022-08-28 14:33:51 CDT"
 summary="${self} version ${version} (${pkgdate})"
-nowdate=$( date +'%F %T %Z' )
+
+# Path relative to sketch source (.ino) files where build artifacts are output.
+output="./build"
+
+# Save the current datetime to be reused throughout the script.
+# Use function `now` to retrieve this time in a desired format.
+#  !! Be sure to leave this stamp unformatted so that calls to `now` will know
+#     how to parse the source datetime string. !!
+__now=$( date )
+
+# now returns a datetime stamp in the given format, but all stamps refer to the
+# same instance in time (${__now}).
+# If given, $2 will override the instance in time as well.
+now() {
+	# Use the default format if no format was given.
+	[[ ${#} -gt 0 ]] || { echo "${__now}"; return 0;	}
+	# Unfortunately there are (at least) two widespread and very incompatible
+	# versions of the `date` utility:
+	if date --version 2>&1 | grep -qi 'gnu'; then
+		# 1. GNU coreutils (Linux, Cygwin/MinGW)
+		#   (Tries its best to identify input format automatically)
+		date --date="${2:-${__now}}" "+${1}"
+	else
+		# 2. AT&T UNIX (FreeBSD, macOS)
+		#   (Requires an input format be specified along with output format)
+		infmt="%a %b %d %T %Z %Y" # taken from EXAMPLES section in date(1) manpage
+		date -j -f "${infmt}" "${2:-${__now}}" "+${1}"
+	fi
+}
 
 flags="
   -A PATTERN        Add all FQBNs matching PATTERN to project
@@ -52,14 +80,22 @@ ${summary}
 
 ╒══╡ USAGE ╞═══════════════════════════════════════════════════════════════════╕
 
+  ( Arguments in square brackets "[]" are optional. )
+
+  Create an empty sketch:
+    ${self} -n empty [sketch]
+
+  List/find an FQBN:
+    ${self} -B [pattern]
+
+  Initialize/attach a target FQBN:
+    ${self} -A pattern [sketch]
+
   Build a sketch:
     ${self} [flags] [sketch]
 
   Flash a sketch:
     ${self} -p /target/device [flags] [sketch]
-
-  List/find an FQBN:
-    ino -B [pattern]
 
   Call arduino-cli:
     ${self} cli [...]
@@ -86,7 +122,7 @@ ${summary}
   The ".fqbn" directory must be in the root of the resolved sketch directory if
   FQBN is not specified with any of the following methods:
 
-    - Specified directly with flag -b 
+    - Specified directly with flag -b
     - Defined in a shell environment script specified with flag -e
 
   Both of these will override any FQBNs discovered in the ".fqbn" subdirectory.
@@ -96,10 +132,10 @@ ${summary}
   Any unrecognized flags (arguments with leading "-"), along with any remaining
   non-sketch-path arguments, are passed to arduino-cli verbatim. All flags given
   after the end-of-arguments delimiter "--" are also passed to arduino-cli.
-  
-    - Note that any arduino-cli flag intermixed (i.e., preceeding "--") which 
-      requires an argument must be specified using its long form syntax 
-      (i.e., "--flag=VALUE"). For example: 
+
+    - Note that any arduino-cli flag intermixed (i.e., preceeding "--") which
+      requires an argument must be specified using its long form syntax
+      (i.e., "--flag=VALUE"). For example:
 
         ${self} upload -i INPUT-FILE               # WRONG
         ${self} upload --input-file INPUT-FILE     # WRONG
@@ -115,17 +151,17 @@ ${summary}
   sketch path), all flags and trailing arguments are passed to arduino-cli
   verbatim. In other words, "ino cli" is an alias for "arduino-cli".
 
-         ──────── TARGET-SPECIFIC FLAGS PASSED TO ARDUINO-CLI ─────────         
-	
+         ──────── TARGET-SPECIFIC FLAGS PASSED TO ARDUINO-CLI ─────────
+
   The FQBN files described above under "FULLY-QUALIFIED BOARD NAME (FQBN)" also
   allow you to store target-specific settings that are used automatically when
   calling arduino-cli for that FQBN. The files are JSON-formatted with a single
   dictionary keyed by arduino-cli commands. The value for each of these keys is
   a list of command-line flags and arguments to append when calling that command
   for that FQBN. An additional "global" key is supported whose list of flags and
-  arguments are appended for all arduin-cli commands.
+  arguments are appended for all arduino-cli commands.
 
-  If the FQBN file is empty, no target-specific flags or arguments are 
+  If the FQBN file is empty, no target-specific flags or arguments are
   automatically added for any arduino-cli command.
 
   An example FQBN file may look like the following:
@@ -140,7 +176,7 @@ ${summary}
   to all invocation of arduino-cli for the target FQBN "adafruit:avr:metro".
 
   If the arduino-cli "compile" command is called (the default command), then the
-  flag "--build-property 'build.extra_flags=-DFOO'" will always be added (in 
+  flag "--build-property 'build.extra_flags=-DFOO'" will always be added (in
   addition to the global flags above) for the target FQBN "adafruit:avr:metro".
 
 ╞══╡ FLAGS ╞═══════════════════════════════════════════════════════════════════╡
@@ -148,11 +184,11 @@ ${flags}
 ╞══╡ EXAMPLES ╞════════════════════════════════════════════════════════════════╡
 
   A simple "blinky" Arduino project structure might look like the following,
-  where you have a sketch source file "blinky.ino" whose basename "blinky" is 
+  where you have a sketch source file "blinky.ino" whose basename "blinky" is
   identical to the name of its parent directory:
 
     blinky/
-    └── blinky.ino 
+    └── blinky.ino
 
   The aim of this script is to reduce the overall typing and complexity of the
   arduino-cli command-line options. Part of the issue is the esoteric and
@@ -177,7 +213,7 @@ ${flags}
     │   ├── adafruit:nrf52:cluenrf52840
     │   ├── adafruit:samd:adafruit_grandcentral_m4
     │   └── teensy:avr:teensy40
-    └── blinky.ino 
+    └── blinky.ino
 
     ╭─────────────────────────────────────────────────────────────────────╮
     │ [NOTE] Alternatively, you can use the add flag (-A pattern) to      │
@@ -198,10 +234,10 @@ ${flags}
   Next we can build and export the executables to the "build" subdirectory of
   our sketch. We will add the clean flag (-c) to ensure the Arduino core is
   rebuilt each time, debug flag (-g) so that we can do source-level debugging
-  with a hardware debug probe, and extremely verbose logging (-l debug) to see 
+  with a hardware debug probe, and extremely verbose logging (-l debug) to see
   what errors were printed if compilation fails:
 
-	  % ${self} -c -g -l debug
+    % ${self} -c -g -l debug
 
   Since all three targets build without error, we now have the following files
   and directory structure in our sketch directory:
@@ -237,10 +273,10 @@ ${flags}
     % ${self} -b \$( ino -B grandcentral ) -p /dev/ttyACM2
 
   Along with the mentioned flags, arduino-cli can also read configuration data
-  from environment variables as well as its own command-line flags. 
+  from environment variables as well as its own command-line flags.
 
   The following example demonstrates an elaborate method to exercise each of
-  these capabilities: 
+  these capabilities:
 
     % ARDUINO_LOGGING_FILE=build.log \\
         ${self} -e <( env -i FQBN=\$( ino -B grandcentral ) ) \\
@@ -278,7 +314,7 @@ sketch-template() {
 			# Otherwise, the given template must be one of the named templates
 			# predefined in this script:
 			unset -v src
-			head="// ${name}.ino (automatically generated ${nowdate})"
+			head="// ${name}.ino (automatically generated $(now '%Y-%m-%d %H:%M:%S'))"
 			case "${tmpl,,}" in
 				empty)
 					src="
@@ -289,7 +325,7 @@ void loop() {
 }
 "
 					;;
-				blinky)
+				blink*)
 					src="
 // Return type of Arduino core function millis()
 typedef unsigned long duration_t;
@@ -332,7 +368,7 @@ void loop() {
 			esac
 			# Verify we recognized the given template identifier.
 			[[ -n ${src} ]] || return 1
-			# Write sketch source and return the full path to the temp file if 
+			# Write sketch source and return the full path to the temp file if
 			# successful. The caller is responsible for cleaning up the temp file.
 			if printf '%s\n%s' "${head}" "${src}" > "${temp}"; then
 				echo "${temp}"
@@ -376,7 +412,7 @@ sketch-init() {
 }
 
 # Normalize the sketch path as the absolute path to the .ino sketch file.
-# Can be deduced given either a directory or file path. 
+# Can be deduced given either a directory or file path.
 # Sketches named <foo>.ino must be inside of a directory named <foo>.
 sketch-path() {
 	local -n outp=${1}
@@ -405,12 +441,14 @@ touch-fqbn() {
 		err=$( cat <<__json__ 2>&1 >"${1}"
 {
     "global": [
-        "--format text",
-        "--log-format json"
+        "--format=text",
+        "--log-format=json"
     ],
     "compile": [
-        "--warnings all",
-        "--build-property \"build.extra_flags=-DFQBN=${1##*/}\""
+        "--warnings=all",
+        "--build-cache-path=${output}/${1##*/}",
+        "--build-path=${output}/${1##*/}",
+        "--dump-profile"
     ]
 }
 __json__
@@ -431,7 +469,7 @@ rm-fqbn() {
 
 valid-fqbn() {
 	# split FQBN after each colon, verify we have 3 components
-  local fqbn=${1}
+	local fqbn=${1}
 	local part=( ${fqbn//:/ } )
 	local vendor=${part[0]} arch=${part[1]} board=${part[2]}
 	if [[ -z ${vendor} ]] || [[ -z ${arch} ]] || [[ -z ${board} ]]; then
@@ -441,8 +479,8 @@ valid-fqbn() {
 }
 
 join-str() {
-    local d=${1-} f=${2-};
-    shift 2 && printf %s "$f" "${@/#/$d}"
+		local d=${1-} f=${2-};
+		shift 2 && printf %s "$f" "${@/#/$d}"
 }
 
 match-fqbn() {
@@ -471,13 +509,13 @@ source-env() {
 	# sourcing the environment file.
 
 	# ensure the flag does not exist for the -n tests below to work
-	unset -v set_a 
+	unset -v set_a
 
 	# check if the user already has allexport enabled. if not, then set the flag
 	# to indicate we need to both enable and disable allexport.
-	[[ ${-} == *a* ]] || set_a=1 
+	[[ ${-} == *a* ]] || set_a=1
 
-	# if the flag has any definition at all, enable allexport. 
+	# if the flag has any definition at all, enable allexport.
 	# otherwise, the flag is already set by the user.
 	[[ -n ${set_a+?} ]] && set -o allexport
 
@@ -507,7 +545,7 @@ fqbn-flags() {
 
 # Assign $2 to the variable named $1 (or die).
 optstr() {
-	[[ ${#} -gt 1 ]] || 
+	[[ ${#} -gt 1 ]] ||
 		halt "flag requires argument (-${1#opt_})"
 	local -n v=${1}
 	v=${2}
@@ -539,7 +577,7 @@ fi
 # Storage for our command line arguments and optional flags
 declare -a arg flag
 declare -x path
-declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_p
+declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_o opt_p
 declare -ax opt_A opt_R
 
 # Poor-man's command-line option parsing
@@ -555,6 +593,7 @@ while [[ ${#} -gt 0 ]]; do
 		-H) usage; exit 0 ;;                # print detailed usage and exit
 		-l) shift; optstr opt_l "${@}" ;;   # set log level
 		-n) shift; optstr opt_n "${@}" ;;   # create sketch file (.ino)
+		-o) shift; optstr opt_o "${@}" ;;   # build output path
 		-p) shift; optstr opt_p "${@}" ;;   # upload to port
 		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
 		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
@@ -578,7 +617,7 @@ if [[ -n ${opt_n} ]]; then
 	created=1
 elif ! sketch-path path arg; then
 	cwd=( "${PWD}" )
-	sketch-path path cwd || [[ ${#arg[@]} -gt 0 ]] || 
+	sketch-path path cwd || [[ ${#arg[@]} -gt 0 ]] ||
 		halt 'sketch not found'
 fi
 
@@ -639,24 +678,29 @@ for fqbn in "${target[@]}"; do
 	# build the command string based on given arguments
 	cmd=( "${bin}" )
 	if [[ ${#arg[@]} -gt 0 ]]; then
-		cmd+=( "${arg[@]}" )
+		cmd+=( ${arg[@]} )
 	else
 		err=$( valid-fqbn "${fqbn}" ) || halt "${err}"
-		cmd+=( compile --fqbn "${fqbn}" --export-binaries )
-		[[ -z ${opt_l} ]] || cmd+=( --log-level "${opt_l}" --verbose )
+		out="${output}/${fqbn}/$( now '%Y-%m-%d %H:%M:%S' )"
+		[[ -z ${opt_o} ]] || out="${opt_o}/${fqbn}"
+		cmd+=( compile --fqbn="${fqbn}" --export-binaries --output-dir="${out}" )
+		[[ -z ${opt_l} ]] || cmd+=( --log-level="${opt_l}" --verbose )
 		[[ -z ${opt_c} ]] || cmd+=( --clean )
 		[[ -z ${opt_g} ]] || cmd+=( --optimize-for-debug )
-		[[ -z ${opt_p} ]] || cmd+=( --port "${opt_p}" --upload )
+		[[ -z ${opt_p} ]] || cmd+=( --port="${opt_p}" --upload )
 	fi
-	[[ ${#flag[@]} -eq 0 ]] || cmd+=( "${flag[@]}" )
+	[[ ${#flag[@]} -eq 0 ]] || cmd+=( ${flag[@]} )
 	# Parse the FQBN-specific flags from the JSON-formatted file
 	declare -a global selcmd
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
-	cmd+=( "${global[@]}" "${selcmd[@]}" )
+	cmd+=( ${global[@]} ${selcmd[@]} )
 	cmd+=( "${path%/*}" )
-	# run command
+	# Run command
 	set -o xtrace
 	"${cmd[@]}"
 	set +o xtrace
+	# Keep a snapshot of the sketch. Thank me later.
+	[[ -d "${output}/${fqbn}/sketch" && -d "${out}" ]] &&
+		cp -r "${output}/${fqbn}/sketch" "${out}"
 done
