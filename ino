@@ -695,7 +695,10 @@ for fqbn in "${target[@]}"; do
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
 	cmd+=( "${global[@]}" "${selcmd[@]}" )
-	cmd+=( "${path%/*}" )
+	# Append sketch path to command-line only if we are running a command that
+	# expects to receive a path
+	[[ ${cmd[0]} =~ compile|debug|sketch|upload ]] &&
+		cmd+=( "${path%/*}" )
 	# Run command
 	set -o xtrace
 	"${cmd[@]}"
