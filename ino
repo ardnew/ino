@@ -536,8 +536,8 @@ fqbn-flags() {
 		while read -re arg; do
 			[[ -n ${arg} && ${arg} != null ]] || continue
 			case "${k}" in
-				global) glo+=( ${arg} ) ;;
-				${3})   sel+=( ${arg} ) ;;
+				global) glo+=( "${arg}" ) ;;
+				${3})   sel+=( "${arg}" ) ;;
 			esac
 		done < <( command jq -r ".${k}[]" "${4}" )
 	done
@@ -694,7 +694,7 @@ for fqbn in "${target[@]}"; do
 	declare -a global selcmd
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
-	cmd+=( ${global[@]} ${selcmd[@]} )
+	cmd+=( "${global[@]}" "${selcmd[@]}" )
 	cmd+=( "${path%/*}" )
 	# Run command
 	set -o xtrace
