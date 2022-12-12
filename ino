@@ -629,7 +629,7 @@ while [[ ${#} -gt 0 ]]; do
 		-o) shift; optstr opt_o "${@}" ;;   # build output path
 		-p) shift; optstr opt_p "${@}" ;;   # upload to port
 		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
-		=*) opt_sel+=( "${1/#-/}" ) ;;      # use only matching FQBN
+		=*) opt_sel+=( "${1/#=/}" ) ;;      # use only matching FQBN
 		^*) opt_ign+=( "${1/#^/}" ) ;;      # use only not matching FQBN
 		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
 		--) flag+=( "${@}" ); break ;;      # append all remaining flags/arguments
@@ -700,13 +700,17 @@ else
 fi
 
 select-fqbn() {
+	# Always exclude hidden files
+	[[ ${1:-"."} == .* ]] && return 1
+	# Exclude files given as exclude patterns
 	for ign in "${opt_ign[@]}"; do
 		[[ "${1}" =~ ${ign} ]] && return 1
 	done
+	# Include if we match any given include pattern
 	for sel in "${opt_sel[@]}"; do
 		[[ "${1}" =~ ${sel} ]] && return 0
 	done
-	# Otherwise, do not exclude unless given a selection
+	# Otherwise, include the file if no include patterns given
 	return ${#opt_sel[@]} 
 }
 
@@ -714,8 +718,7 @@ select-fqbn() {
 if [[ ${#target[@]} -eq 0 ]] && [[ -d "${path%/*}/.fqbn" ]]; then
 	while read -re f; do
 		# Ignore hidden and excluded files
-		[[ "${f}" == .* ]] && select-fqbn "${f}" || 
-			target+=( "${f}" )
+		select-fqbn "${f}" && target+=( "${f}" )
 	done < <( command ls -t "${path%/*}/.fqbn" )
 fi
 
