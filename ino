@@ -11,12 +11,12 @@ fi
 set -oo errexit pipefail
 
 self=${0##*/}
-version="0.3.1"
-pkgdate="2022-08-28 14:33:51 CDT"
+version="0.3.3"
+pkgdate="2022-12-12 10:11:48 CST"
 summary="${self} version ${version} (${pkgdate})"
 
 # Path relative to sketch source (.ino) files where build artifacts are output.
-output="./build"
+output="build"
 
 # Save the current datetime to be reused throughout the script.
 # Use function `now` to retrieve this time in a desired format.
@@ -29,7 +29,7 @@ __now=$( date )
 # If given, $2 will override the instance in time as well.
 now() {
 	# Use the default format if no format was given.
-	[[ ${#} -gt 0 ]] || { echo "${__now}"; return 0;	}
+	[[ ${#} -gt 0 ]] || { echo "${__now}"; return 0; }
 	# Unfortunately there are (at least) two widespread and very incompatible
 	# versions of the `date` utility:
 	if date --version 2>&1 | grep -qi 'gnu'; then
@@ -54,10 +54,13 @@ flags="
   -h                Brief help summary
   -H                Detailed usage and examples
   -l LEVEL          Set log verbosity to LEVEL (see ${self} cli --help)
+  -m                Verify compilation, do not upload sketch
   -n TEMPLATE       Create a sketch .ino (\"empty\", \"blinky\", or file path)
   -p PORT           Upload to device at path PORT
   -R PATTERN        Remove all FQBNs matching PATTERN from project
   -*                Append arbitrary flag
+  =PATTERN          Use only FQBNs in project matching PATTERN
+  ^PATTERN          Use only FQBNs in project not matching PATTERN
 "
 
 brief() {
@@ -88,11 +91,14 @@ ${summary}
   List/find an FQBN:
     ${self} -B [pattern]
 
-  Initialize/attach a target FQBN:
+  Initialize/add a target FQBN:
     ${self} -A pattern [sketch]
 
   Build a sketch:
     ${self} [flags] [sketch]
+
+  Build a sketch for a certain target FQBN:
+    ${self} =pattern [flags] [sketch]
 
   Flash a sketch:
     ${self} -p /target/device [flags] [sketch]
@@ -175,8 +181,8 @@ ${summary}
   In this case, the flags "--format text" and "--log-format json" will be added
   to all invocation of arduino-cli for the target FQBN "adafruit:avr:metro".
 
-  If the arduino-cli "compile" command is called (the default command), then the
-  flag "--build-property 'build.extra_flags=-DFOO'" will always be added (in
+  If the arduino-cli "compile" command is called (the default command), then
+  the flag "--build-property 'build.extra_flags=-DFOO'" will also be added (in
   addition to the global flags above) for the target FQBN "adafruit:avr:metro".
 
 ╞══╡ FLAGS ╞═══════════════════════════════════════════════════════════════════╡
@@ -201,8 +207,9 @@ ${flags}
     │                                                                     │
     │         % ${self} -B | xargs -I{} touch /path/to/fqbn.db/{}             │
     │                                                                     │
-    │       Then you can simply copy the desired targets into a sketch    │
-    │       directory, or delete them from your sketch when not needed.   │
+    │       Then you can add any special configurations or flags to reuse │
+    │       on every sketch in which these FQBNs are targeted by simply   │
+    │       copying/symlinking the respective file into your sketch.      │
     ╰─────────────────────────────────────────────────────────────────────╯
 
   First, we create a subdirectory ".fqbn" containing three target devices we
@@ -228,6 +235,24 @@ ${flags}
     │        all matching FQBNs from the project:                         │
     │                                                                     │
     │          % ${self} -R cluenrf52 grandcentral teensy40                   │
+    │                                                                     │
+    ╰─────────────────────────────────────────────────────────────────────╯
+
+    ╭─────────────────────────────────────────────────────────────────────╮
+    │ [NOTE] You can temporarily disable an FQBN, without deleting or     │
+    │        losing its configuration, by prepending a period "." to its  │
+    │        file name:                                                   │
+    │                                                                     │
+    │          % cp .fqbn/{,.}teensy:avr:teensy40     # disable teensy40  │
+    │          % cp .fqbn/{.,}teensy:avr:teensy40     # reenable          │
+    │                                                                     │
+    │        ${self} ignores all hidden files.                                │
+    │                                                                     │
+    │        Alternatively, you can select/exclude specific FQBNs using   │
+    │        the following syntax (refer to "blinky" project above):      │
+    │                                                                     │
+    │          % ${self} =teensy     # build only teensy:avr:teensy40         │
+    │          % ${self} ^teensy     # exclude only teensy:avr:teensy40       │
     │                                                                     │
     ╰─────────────────────────────────────────────────────────────────────╯
 
@@ -507,6 +532,11 @@ source-env() {
 	# temporarily set the allexport option if the user does not have it enabled.
 	# otherwise, the user has it enabled, leave it on and do not disable it after
 	# sourcing the environment file.
+	#
+	# because of the nature of this function (i.e., modifying shell env), we can't
+	# simply do this in a subshell, such as:
+	#   ( set -a; ...; )
+	# since — by design — subshells cannot modify an ancestor's environment.
 
 	# ensure the flag does not exist for the -n tests below to work
 	unset -v set_a
@@ -521,7 +551,7 @@ source-env() {
 
 	for src; do command . "${src}"; done
 
-	# if the flag has any definition at all, disable allexport
+	# if the flag has any definition at all, disable allexport.
 	# otherwise, the flag is already set by the user and we do not want to modify
 	# their environment unintentionally.
 	[[ -n ${set_a+?} ]] && set +o allexport
@@ -533,6 +563,7 @@ fqbn-flags() {
 	local -n sel=${2}
 	local -a key=( $( command jq -r 'keys[]' "${4}" ) )
 	for k in "${key[@]}"; do
+		local arg
 		while read -re arg; do
 			[[ -n ${arg} && ${arg} != null ]] || continue
 			case "${k}" in
@@ -577,7 +608,8 @@ fi
 # Storage for our command line arguments and optional flags
 declare -a arg flag
 declare -x path
-declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_o opt_p
+declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_m opt_o opt_p
+declare -ax opt_sel opt_ign
 declare -ax opt_A opt_R
 
 # Poor-man's command-line option parsing
@@ -592,10 +624,13 @@ while [[ ${#} -gt 0 ]]; do
 		-h) brief; exit 0 ;;                # print brief help and exit
 		-H) usage; exit 0 ;;                # print detailed usage and exit
 		-l) shift; optstr opt_l "${@}" ;;   # set log level
+		-m) opt_m=1 ;;                      # verify compilation, do not upload
 		-n) shift; optstr opt_n "${@}" ;;   # create sketch file (.ino)
 		-o) shift; optstr opt_o "${@}" ;;   # build output path
 		-p) shift; optstr opt_p "${@}" ;;   # upload to port
 		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
+		=*) opt_sel+=( "${1/#-/}" ) ;;      # use only matching FQBN
+		^*) opt_ign+=( "${1/#^/}" ) ;;      # use only not matching FQBN
 		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
 		--) flag+=( "${@}" ); break ;;      # append all remaining flags/arguments
 		*)  arg+=( "${1}" ) ;;              # append arbitrary argument
@@ -620,6 +655,9 @@ elif ! sketch-path path arg; then
 	sketch-path path cwd || [[ ${#arg[@]} -gt 0 ]] ||
 		halt 'sketch not found'
 fi
+
+# Define our output root path
+output=${opt_o:-"${path%/*}/${output}"}
 
 # Add all matching FQBNs to project
 if [[ ${#opt_A[@]} -gt 0 ]]; then
@@ -661,10 +699,23 @@ else
 	target+=( "${opt_b}" )
 fi
 
+select-fqbn() {
+	for ign in "${opt_ign[@]}"; do
+		[[ "${1}" =~ ${ign} ]] && return 1
+	done
+	for sel in "${opt_sel[@]}"; do
+		[[ "${1}" =~ ${sel} ]] && return 0
+	done
+	# Otherwise, do not exclude unless given a selection
+	return ${#opt_sel[@]} 
+}
+
 # If FQBN not specified at command-line or environment, check .fqbn subdirectory
 if [[ ${#target[@]} -eq 0 ]] && [[ -d "${path%/*}/.fqbn" ]]; then
 	while read -re f; do
-		target+=( "${f}" )
+		# Ignore hidden and excluded files
+		[[ "${f}" == .* ]] && select-fqbn "${f}" || 
+			target+=( "${f}" )
 	done < <( command ls -t "${path%/*}/.fqbn" )
 fi
 
@@ -673,6 +724,7 @@ fi
 	halt 'fully-qualified board name (fqbn) undefined'
 
 # Build every FQBN found in target array
+#set -o xtrace
 for fqbn in "${target[@]}"; do
 	unset -v cmd
 	# build the command string based on given arguments
@@ -682,12 +734,13 @@ for fqbn in "${target[@]}"; do
 	else
 		err=$( valid-fqbn "${fqbn}" ) || halt "${err}"
 		out="${output}/${fqbn}/$( now '%Y-%m-%d %H:%M:%S' )"
-		[[ -z ${opt_o} ]] || out="${opt_o}/${fqbn}"
+		#[[ -z ${opt_o} ]] || out="${opt_o}/${fqbn}"
 		cmd+=( compile --fqbn="${fqbn}" --export-binaries --output-dir="${out}" )
 		[[ -z ${opt_l} ]] || cmd+=( --log-level="${opt_l}" --verbose )
 		[[ -z ${opt_c} ]] || cmd+=( --clean )
 		[[ -z ${opt_g} ]] || cmd+=( --optimize-for-debug )
-		[[ -z ${opt_p} ]] || cmd+=( --port="${opt_p}" --upload )
+		# Flash target unless we are verifying compilation or no port specified.
+		[[ -n ${opt_m} || -z ${opt_p} ]] || cmd+=( --port="${opt_p}" --upload )
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( ${flag[@]} )
 	# Parse the FQBN-specific flags from the JSON-formatted file
@@ -695,11 +748,13 @@ for fqbn in "${target[@]}"; do
 	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
 	# Use only the global flags and those defined for our selected command
 	cmd+=( "${global[@]}" "${selcmd[@]}" )
+	# Prevent flags persisting across FQBN iterations
+	unset -v global selcmd
 	# Append sketch path to command-line only if we are running a command that
 	# expects to receive a path
-	[[ ${cmd[0]} =~ compile|debug|sketch|upload ]] &&
+	[[ ${cmd[1]} =~ compile|debug|sketch|upload ]] &&
 		cmd+=( "${path%/*}" )
-	# Run command
+	# Run command in a subshell
 	set -o xtrace
 	"${cmd[@]}"
 	set +o xtrace
