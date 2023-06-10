@@ -11,8 +11,8 @@ fi
 set -oo errexit pipefail
 
 self=${0##*/}
-version="0.3.3"
-pkgdate="2022-12-12 10:11:48 CST"
+version="0.4.0"
+pkgdate="2023-06-10 06:05:52 CST"
 summary="${self} version ${version} (${pkgdate})"
 
 # Path relative to sketch source (.ino) files where build artifacts are output.
@@ -49,15 +49,18 @@ flags="
   -b FQBN           Use FQBN specified at command-line
   -B [PATTERN]      List all FQBNs matching PATTERN
   -c                Clean build directory
+  -D NAME[=VALUE]   Define temporary global macro NAME, optionally with VALUE
   -e PATH           Source env file at PATH
   -g                Optimize for debugging
   -h                Brief help summary
   -H                Detailed usage and examples
+  -I PATTERN        Find and install (Git clone) each library matching PATTERN
   -l LEVEL          Set log verbosity to LEVEL (see ${self} cli --help)
   -m                Verify compilation, do not upload sketch
   -n TEMPLATE       Create a sketch .ino (\"empty\", \"blinky\", or file path)
   -p PORT           Upload to device at path PORT
   -R PATTERN        Remove all FQBNs matching PATTERN from project
+  -v                Synonym for -l LEVEL (multiple occurrences increases LEVEL)
   -*                Append arbitrary flag
   =PATTERN          Use only FQBNs in project matching PATTERN
   ^PATTERN          Use only FQBNs in project not matching PATTERN
@@ -68,9 +71,16 @@ brief() {
 ${summary}
 
 USAGE:
-  ${self} [flags] [sketch]         # build/flash a sketch
-  ${self} -B [pattern]             # list/search for FQBN
-  ${self} cli [...]                # alias for arduino-cli
+ ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ 
+ ┃ ${self} [flags] [sketch]          ╠═╤═Þ build/flash a sketch         ┃ 
+ ┃   ${self} =[pattern] [...]        ║ ├───• include only matching FQBN ┃ █
+ ┃   ${self} ^[pattern] [...]        ║ └───• exclude all matching FQBN  ┃ █
+ ┃ ${self} -B [pattern]              ╠═╤═Þ list/search for FQBN         ┃ █
+ ┃   ${self} -A [pattern]            ║ ├───• add FQBN to project        ┃ █
+ ┃   ${self} -R [pattern]            ║ └───• remove FQBN from project   ┃ █
+ ┃ ${self} cli [...]                 ╚═══Þ alias for arduino-cli        ┃ █
+ ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ █
+  ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
 
 FLAGS:
 ${flags}
@@ -96,6 +106,9 @@ ${summary}
 
   Build a sketch:
     ${self} [flags] [sketch]
+
+  Build a sketch with config/metadata embedded in global macro definitions
+    ${self} -D DEBUG -D "BUILD_DATE=\$(date +%s)" [flags] [sketch]
 
   Build a sketch for a certain target FQBN:
     ${self} =pattern [flags] [sketch]
@@ -174,15 +187,15 @@ ${summary}
 
     % cat .fqbn/adafruit\:avr\:metro
     {
-        "global": [ "--format text", "--log-format json" ],
-        "compile": [ "--build-property 'build.extra_flags=-DFOO'" ]
+        "global": [ "--format=text", "--log-format=json", "--log-level=trace" ],
+        "compile": [ "--build-property=build.extra_flags=-DDEBUG" ]
     }
 
-  In this case, the flags "--format text" and "--log-format json" will be added
+  In this case, the flags "--format=text" and "--log-format=json" will be added
   to all invocation of arduino-cli for the target FQBN "adafruit:avr:metro".
 
   If the arduino-cli "compile" command is called (the default command), then
-  the flag "--build-property 'build.extra_flags=-DFOO'" will also be added (in
+  the flag "--build-property=build.extra_flags=-DFOO" will also be added (in
   addition to the global flags above) for the target FQBN "adafruit:avr:metro".
 
 ╞══╡ FLAGS ╞═══════════════════════════════════════════════════════════════════╡
@@ -301,7 +314,8 @@ ${flags}
   from environment variables as well as its own command-line flags.
 
   The following example demonstrates an elaborate method to exercise each of
-  these capabilities:
+	these capabilities (i.e., please do not do this — there are much simpler 
+	alternatives; this is only a demo):
 
     % ARDUINO_LOGGING_FILE=build.log \\
         ${self} -e <( env -i FQBN=\$( ino -B grandcentral ) ) \\
@@ -463,6 +477,7 @@ touch-fqbn() {
 	if [[ -f "${1}" && -r "${1}" ]]; then
 		echo " ~ ${1##*/}"
 	else
+		local outpath="${output}/${1##*/}"
 		err=$( cat <<__json__ 2>&1 >"${1}"
 {
     "global": [
@@ -471,8 +486,8 @@ touch-fqbn() {
     ],
     "compile": [
         "--warnings=all",
-        "--build-cache-path=${output}/${1##*/}",
-        "--build-path=${output}/${1##*/}",
+        "--build-cache-path=${outpath//:/\/}",
+        "--build-path=${outpath//:/\/}",
         "--dump-profile"
     ]
 }
@@ -492,15 +507,23 @@ rm-fqbn() {
 	[[ -z ${err} ]]
 }
 
-valid-fqbn() {
+split-fqbn() {
 	# split FQBN after each colon, verify we have 3 components
 	local fqbn=${1}
 	local part=( ${fqbn//:/ } )
-	local vendor=${part[0]} arch=${part[1]} board=${part[2]}
-	if [[ -z ${vendor} ]] || [[ -z ${arch} ]] || [[ -z ${board} ]]; then
-		printf -- 'invalid fully-qualified board name (fqbn): %s' "${fqbn}"
+	local vendor=${part[0]} arch=${part[1]} board=${part[2]} option=${part[3]}
+	[[ -z ${vendor} || -z ${arch} || -z ${board} ]] && 
 		return 1
-	fi
+	# print board here if an options string is given. otherwise it will be 
+	# printed below as the last component.
+	printf "%s\n%s\n%s" "${vendor}" "${arch}" "${option:+$'${board}\n'}"
+	# last component is the options string if given, and board otherwise.
+	local last=${option:-"${board}"}
+	# build scheme is delimited with "~" on the FQBN's last component.
+	local scheme=${last##*~}
+	# keep the "~" prefixed to scheme, so that we can distinguish it in the
+	# case where the options string was not given.
+	printf "%s\n%s" "${last%~*}" "${scheme:+$'~${scheme}\n'}"
 }
 
 join-str() {
@@ -557,6 +580,7 @@ source-env() {
 	[[ -n ${set_a+?} ]] && set +o allexport
 }
 
+# Parse FQBN file (JSON) for command-line arguments to forward to arduino-cli
 fqbn-flags() {
 	[[ ${#} -gt 3 && -r "${4}" ]] || return
 	local -n glo=${1}
@@ -599,18 +623,18 @@ else
 fi
 
 # Before we process the command-line, check if everything should instead be
-# forwarded to arduino-cli.
+# forwarded to arduino-cli
 if [[ ${#} -gt 0 && ${1} == "cli" ]]; then
 	# Replace this process with a call to arduino-cli.
 	exec "${bin}" "${@:2}"
 fi
 
-# Storage for our command line arguments and optional flags
+# Storage for our command-line arguments and optional flags
 declare -a arg flag
 declare -x path
-declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_m opt_o opt_p
+declare -x opt_b opt_B opt_c opt_e opt_g opt_l opt_n opt_m opt_o opt_p opt_v
 declare -ax opt_sel opt_ign
-declare -ax opt_A opt_R
+declare -ax opt_A opt_D opt_I opt_R
 
 # Poor-man's command-line option parsing
 while [[ ${#} -gt 0 ]]; do
@@ -619,26 +643,42 @@ while [[ ${#} -gt 0 ]]; do
 		-b) shift; optstr opt_b "${@}" ;;   # use FQBN specified at command-line
 		-B) shift; list-all "${@}" ;;       # list all matching FQBNs
 		-c) opt_c=1 ;;                      # clean build directory
+		-D) shift; optarr opt_D "${1}" ;;   # define all given macros globally
 		-e) shift; optstr opt_e "${@}" ;;   # source given env
 		-g) opt_g=1 ;;                      # keep debug symbols
 		-h) brief; exit 0 ;;                # print brief help and exit
 		-H) usage; exit 0 ;;                # print detailed usage and exit
+		-I) shift; optarr opt_I "${@}" ;;   # find, install all matching libraries
 		-l) shift; optstr opt_l "${@}" ;;   # set log level
 		-m) opt_m=1 ;;                      # verify compilation, do not upload
 		-n) shift; optstr opt_n "${@}" ;;   # create sketch file (.ino)
 		-o) shift; optstr opt_o "${@}" ;;   # build output path
 		-p) shift; optstr opt_p "${@}" ;;   # upload to port
 		-R) shift; optarr opt_R "${@}" ;;   # remove all matching FQBNs
+		-v) opt_v=$(( opt_v + 1 )) ;;       # increase log LEVEL
 		=*) opt_sel+=( "${1/#=/}" ) ;;      # use only matching FQBN
 		^*) opt_ign+=( "${1/#^/}" ) ;;      # use only not matching FQBN
-		-*) flag+=( "${1}" ) ;;             # append arbitrary flag
+		--help)                             # capture --help unless its forwarded
+			[[ ${#flag[@]} -eq 0 && ${#arg[@]} -eq 0 ]] && 
+				{ usage; exit 0; }
+				;&                              # fallthrough (requires bash >=4.0)
+		-*) flag+=( "${1}" ) ;;             # append arbitrary flag	
 		--) flag+=( "${@}" ); break ;;      # append all remaining flags/arguments
 		*)  arg+=( "${1}" ) ;;              # append arbitrary argument
 	esac
 	shift
 done
 
-# Determine path to our sketch file.
+# First install any requested libraries
+if [[ ${#opt_I[@]} -gt 0 ]]; then
+	for lp in "${opt_I[@]}"; do
+		cmd=( lib search "${lp}" )
+		#if temp=$( mktemp --quiet "${self}.XXXXXX" ); then	
+		#fi
+	done
+fi
+
+# Determine path to our sketch file
 unset -v created
 if [[ -n ${opt_n} ]]; then
 	# Use PWD if no args given
@@ -688,17 +728,22 @@ fi
 # If given, source the environment file specified with -e <path>.
 [[ -n ${opt_e} ]] && source-env "${opt_e}"
 
+#set -o xtrace
+
 # Build all targets discovered by either command-line or .fqbn subdirectory
-declare -a target
+declare -A target
 
 if [[ -z ${opt_b} ]]; then
 	# Check environment for FQBN if not given at command-line.
-	[[ -n ${FQBN} ]] && target+=( "${FQBN}" )
-else
+	[[ -n ${FQBN} ]] && target[${FQBN}]=
+else 
 	# Always use FQBN specified at command-line, if given.
-	target+=( "${opt_b}" )
+	target[${opt_b}]=
 fi
 
+# Filter the selected FQBNs based on the include/exclude rules given on the
+# command-line. 
+# Also filters any hidden FQBN files (file names prefixed with ".").
 select-fqbn() {
 	# Always exclude hidden files
 	[[ ${1:-"."} == .* ]] && return 1
@@ -711,34 +756,47 @@ select-fqbn() {
 		[[ "${1}" =~ ${sel} ]] && return 0
 	done
 	# Otherwise, include the file if no include patterns given
-	return ${#opt_sel[@]} 
+	return ${#opt_sel[@]} # (success iff opt_sel[] is empty)
 }
 
-# If FQBN not specified at command-line or environment, check .fqbn subdirectory
+# If FQBN not found in command-line or environment, check .fqbn subdirectory
 if [[ ${#target[@]} -eq 0 ]] && [[ -d "${path%/*}/.fqbn" ]]; then
 	while read -re f; do
 		# Ignore hidden and excluded files
-		select-fqbn "${f}" && target+=( "${f}" )
+		select-fqbn "${f}" && target[${f}]="${path%/*}/.fqbn/${f}"
 	done < <( command ls -t "${path%/*}/.fqbn" )
 fi
 
 # Verify we have a board specified
 [[ ${#target[@]} -gt 0 ]] || [[ ${#arg[@]} -gt 0 ]] ||
-	halt 'fully-qualified board name (fqbn) undefined'
+	halt 'fully-qualified board name (FQBN) undefined'
 
 # Build every FQBN found in target array
-#set -o xtrace
-for fqbn in "${target[@]}"; do
-	unset -v cmd
+for fqbn in "${!target[@]}"; do
+	unset -v cmd part base option scheme
 	# build the command string based on given arguments
 	cmd=( "${bin}" )
 	if [[ ${#arg[@]} -gt 0 ]]; then
 		cmd+=( ${arg[@]} )
 	else
-		err=$( valid-fqbn "${fqbn}" ) || halt "${err}"
-		out="${output}/${fqbn}/$( now '%Y-%m-%d %H:%M:%S' )"
-		#[[ -z ${opt_o} ]] || out="${opt_o}/${fqbn}"
-		cmd+=( compile --fqbn="${fqbn}" --export-binaries --output-dir="${out}" )
+		part=( $( split-fqbn "${fqbn}" ) ) || 
+			halt "invalid fully-qualified board name (FQBN): ${fqbn}"
+		base=$( join-str ":" "${part[@]::3}" )
+		[[ "${part[3]:0:1}" == "~" ]] && 
+			option=           scheme=${part[3]:1} ||
+			option=${part[3]} scheme=${part[4]:1}
+		# spec always contains "vendor:arch:board" at minimum; but if options were 
+		# given, ":options" is appended.
+		spec="${base}${option:+":${option}"}"
+		# if scheme was given, place the files in a respectively named subdirectory
+		out="${output}/${base}/${scheme:+"${scheme}/"}$( now '%Y-%m-%d %H-%M-%S' )"
+		cmd+=( 
+			compile 
+			--fqbn="${base}${option:+":${option}"}" 
+			--export-binaries 
+			--output-dir="${out//:/\/}" 
+		)
+		[[ ${#opt_D[@]} -eq 0 ]] || cmd+=( --build-property=build.extra_flags=${opt_D[@]/#/-D} )
 		[[ -z ${opt_l} ]] || cmd+=( --log-level="${opt_l}" --verbose )
 		[[ -z ${opt_c} ]] || cmd+=( --clean )
 		[[ -z ${opt_g} ]] || cmd+=( --optimize-for-debug )
@@ -746,13 +804,12 @@ for fqbn in "${target[@]}"; do
 		[[ -n ${opt_m} || -z ${opt_p} ]] || cmd+=( --port="${opt_p}" --upload )
 	fi
 	[[ ${#flag[@]} -eq 0 ]] || cmd+=( ${flag[@]} )
-	# Parse the FQBN-specific flags from the JSON-formatted file
-	declare -a global selcmd
-	fqbn-flags global selcmd "${cmd[1]}" "${path%/*}/.fqbn/${fqbn}"
-	# Use only the global flags and those defined for our selected command
-	cmd+=( "${global[@]}" "${selcmd[@]}" )
-	# Prevent flags persisting across FQBN iterations
-	unset -v global selcmd
+	# Parse the FQBN-specific flags from the JSON-formatted file. Files may be
+	# further discriminated by Arduino build options and/or ino build scheme.
+	declare -a global=() selcmd=()
+	fqbn-flags global selcmd "${cmd[1]}" "${target[${fqbn}]}" &&
+		# Use only the global flags and those defined for our selected command
+		cmd+=( "${global[@]}" "${selcmd[@]}" )
 	# Append sketch path to command-line only if we are running a command that
 	# expects to receive a path
 	[[ ${cmd[1]} =~ compile|debug|sketch|upload ]] &&
