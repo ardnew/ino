@@ -11,12 +11,12 @@ fi
 set -oo errexit pipefail
 
 self=${0##*/}
-version="0.4.0"
-pkgdate="2023-06-10 06:05:52 CST"
+version="0.4.1"
+pkgdate="2023-07-10 16:05:32 CST"
 summary="${self} version ${version} (${pkgdate})"
 
 # Path relative to sketch source (.ino) files where build artifacts are output.
-output="build"
+output=".build"
 
 # Save the current datetime to be reused throughout the script.
 # Use function `now` to retrieve this time in a desired format.
@@ -787,12 +787,12 @@ for fqbn in "${!target[@]}"; do
 			option=${part[3]} scheme=${part[4]:1}
 		# spec always contains "vendor:arch:board" at minimum; but if options were 
 		# given, ":options" is appended.
-		spec="${base}${option:+":${option}"}"
+		spec="${base}${option:+"=${option}"}"
 		# if scheme was given, place the files in a respectively named subdirectory
-		out="${output}/${base}/${scheme:+"${scheme}/"}$( now '%Y-%m-%d %H-%M-%S' )"
+		out="${output}/${spec}/$( now '%Y-%m-%d %H-%M-%S' )"
 		cmd+=( 
 			compile 
-			--fqbn="${base}${option:+":${option}"}" 
+			--fqbn="${base}${option:+"=${option}"}" 
 			--export-binaries 
 			--output-dir="${out//:/\/}" 
 		)
